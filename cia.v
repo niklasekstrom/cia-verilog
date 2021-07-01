@@ -12,7 +12,7 @@
  * - Control Registers (CRA, CRB)
  *
  * Features that are deliberately not implemented:
- * - Outputting TA underflow on PB6/7 (PBON, OUTMODE bits are stuck zero)
+ * - Outputting TA/TB underflow on PB6/7 (PBON, OUTMODE bits are stuck zero)
  * - Using CNT as source for TA/TB (INMODE bit is stuck zero)
  *
  * Features that could probably be removed to save logic elements:
@@ -277,7 +277,7 @@ module cia(
     always @(negedge E_CLK or negedge RESET_n) begin
         if (!RESET_n)
             tod_50hz <= 1'b0;
-        else if (!CS_n && RW && A == REG_CRA)
+        else if (!CS_n && !RW && A == REG_CRA)
             tod_50hz <= D[7];
     end
 
@@ -285,7 +285,7 @@ module cia(
     always @(negedge E_CLK or negedge RESET_n) begin
         if (!RESET_n)
             tod_set_alarm <= 1'b0;
-        else if (!CS_n && RW && A == REG_CRB)
+        else if (!CS_n && !RW && A == REG_CRB)
             tod_set_alarm <= D[7];
     end
 
@@ -365,7 +365,7 @@ module cia(
             end
             else begin
                 if (!tick_sync_2 && tick_sync_1) begin
-                    if (tod_50hz && tod_ticks == 4 || tod_ticks == 5) begin
+                    if (tod_50hz && tod_ticks == 3'd4 || tod_ticks == 3'd5) begin
                         tod_ticks <= 3'd0;
                         if (tod_10th[3:0] == 4'd9) begin
                             tod_10th[3:0] <= 4'd0;
@@ -556,7 +556,7 @@ module cia(
     reg [4:0] icr_mask;
     reg [4:0] icr_data;
 
-    wire ir = (icr_data & icr_mask) != 5'd0;
+    wire ir = |(icr_data & icr_mask);
     assign IRQ_n = ir ? 1'b0 : 1'bz;
 
     // Update icr_mask.
