@@ -17,11 +17,6 @@
  *
  * Features that could probably be removed to save logic elements:
  * - I don't think the TOD alarm feature is used.
- * - Furthermore, the whole TOD feature seems a bit unnecessary. It's used somewhere
- *   in graphics.library for something light pen related, which is probably almost never used.
- * - It may be possible to simplify the TOD counter by treating it as a 24-bit value
- *   instead of BCD values. I believe this is less correct, but perhaps correct enough,
- *   since the TOD is hardly used anyway.
  *
  * Gotchas:
  * - The polarity of shift_out_clk and the CNT signal are inverted. It seems like
@@ -64,10 +59,10 @@ module cia(
     localparam [3:0] REG_TA_HI = 4'h5;
     localparam [3:0] REG_TB_LO = 4'h6;
     localparam [3:0] REG_TB_HI = 4'h7;
-    localparam [3:0] REG_TOD_10TH = 4'h8;
-    localparam [3:0] REG_TOD_SEC = 4'h9;
-    localparam [3:0] REG_TOD_MIN = 4'ha;
-    localparam [3:0] REG_TOD_HR = 4'hb;
+    localparam [3:0] REG_TOD_LOW = 4'h8;
+    localparam [3:0] REG_TOD_MID = 4'h9;
+    localparam [3:0] REG_TOD_HI = 4'ha;
+    localparam [3:0] REG_B_UNUSED = 4'hb;
     localparam [3:0] REG_SDR = 4'hc;
     localparam [3:0] REG_ICR = 4'hd;
     localparam [3:0] REG_CRA = 4'he;
@@ -77,14 +72,13 @@ module cia(
     reg ta_running;
     reg ta_oneshot;
     reg sp_output;
-    reg tod_50hz;
 
     reg tb_running;
     reg tb_oneshot;
     reg tb_count_ta_underflow;
     reg tod_set_alarm;
 
-    wire [7:0] cra = {tod_50hz, sp_output, 2'b00, ta_oneshot, 2'b00, ta_running};
+    wire [7:0] cra = {1'b0, sp_output, 2'b00, ta_oneshot, 2'b00, ta_running};
     wire [7:0] crb = {tod_set_alarm, tb_count_ta_underflow, 2'b00, tb_oneshot, 2'b00, tb_running};
 
     // Port A/B.
@@ -250,20 +244,9 @@ module cia(
     end
 
     // Time of Day clock (TOD).
-    reg [7:0] tod_10th;
-    reg [7:0] tod_sec;
-    reg [7:0] tod_min;
-    reg [7:0] tod_hr;
-
-    reg [7:0] latched_10th;
-    reg [7:0] latched_sec;
-    reg [7:0] latched_min;
-    reg [7:0] latched_hr;
-
-    reg [7:0] alarm_10th;
-    reg [7:0] alarm_sec;
-    reg [7:0] alarm_min;
-    reg [7:0] alarm_hr;
+    reg [23:0] tod_counter;
+    reg [23:0] tod_latch;
+    reg [23:0] tod_alarm;
     reg alarm_set;
 
     reg tod_running;
@@ -271,15 +254,6 @@ module cia(
 
     reg tick_sync_1;
     reg tick_sync_2;
-    reg [2:0] tod_ticks;
-
-    // Update tod_50hz.
-    always @(negedge E_CLK or negedge RESET_n) begin
-        if (!RESET_n)
-            tod_50hz <= 1'b0;
-        else if (!CS_n && !RW && A == REG_CRA)
-            tod_50hz <= D[7];
-    end
 
     // Update tod_set_alarm.
     always @(negedge E_CLK or negedge RESET_n) begin
@@ -289,19 +263,16 @@ module cia(
             tod_set_alarm <= D[7];
     end
 
-    // Update tod_latched.
+    // Update tod_latched, tod_latch.
     always @(negedge E_CLK or negedge RESET_n) begin
         if (!RESET_n)
             tod_latched <= 1'b0;
         else if (!CS_n && RW && !tod_set_alarm) begin
-            if (A == REG_TOD_HR) begin
-                latched_10th <= tod_10th;
-                latched_sec <= tod_sec;
-                latched_min <= tod_min;
-                latched_hr <= tod_hr;
+            if (A == REG_TOD_HI) begin
+                tod_latch <= tod_counter;
                 tod_latched <= 1'b1;
             end
-            else if (A == REG_TOD_10TH)
+            else if (A == REG_TOD_LOW)
                 tod_latched <= 1'b0;
         end
     end
@@ -310,24 +281,19 @@ module cia(
     always @(negedge E_CLK or negedge RESET_n) begin
         if (!RESET_n)
             alarm_set <= 1'b0;
-        else if (!CS_n && !RW && tod_set_alarm && A == REG_TOD_10TH)
+        else if (!CS_n && !RW && tod_set_alarm && A == REG_TOD_LOW)
             alarm_set <= 1'b1;
     end
 
-    // Update alarm_xxx.
+    // Update tod_alarm.
     always @(negedge E_CLK or negedge RESET_n) begin
-        if (!RESET_n) begin
-            alarm_10th <= 8'd0;
-            alarm_sec <= 8'd0;
-            alarm_min <= 8'd0;
-            alarm_hr <= 8'd0;
-        end
+        if (!RESET_n)
+            tod_alarm <= 24'd0;
         else if (!CS_n && !RW && tod_set_alarm) begin
             case (A)
-                REG_TOD_10TH: alarm_10th <= D;
-                REG_TOD_SEC: alarm_sec <= D;
-                REG_TOD_MIN: alarm_min <= D;
-                REG_TOD_HR: alarm_hr <= D;
+                REG_TOD_LOW: tod_alarm[7:0] <= D;
+                REG_TOD_MID: tod_alarm[15:8] <= D;
+                REG_TOD_HI: tod_alarm[23:16] <= D;
             endcase
         end
     end
@@ -340,77 +306,29 @@ module cia(
     always @(negedge E_CLK or negedge RESET_n) begin
         if (!RESET_n) begin
             tod_running <= 1'b0;
-            tod_ticks <= 3'd0;
-            tod_10th <= 8'd0;
-            tod_sec <= 8'd0;
-            tod_min <= 8'd0;
-            tod_hr <= 8'd0;
+            tod_counter <= 24'd0;
         end
         else begin
-            if (!CS_n && !RW && A == REG_TOD_HR) begin
+            if (!CS_n && !RW && A == REG_TOD_HI) begin
                 tod_running <= 1'b0;
-                tod_hr <= D;
+                tod_counter[23:16] <= D;
             end
             else if (!tod_running) begin
                 if (!CS_n && !RW) begin
-                    if (A == REG_TOD_MIN)
-                        tod_min <= D;
-                    else if (A == REG_TOD_SEC)
-                        tod_sec <= D;
-                    else if (A == REG_TOD_10TH) begin
-                        tod_10th <= D;
+                    if (A == REG_TOD_MID)
+                        tod_counter[15:8] <= D;
+                    else if (A == REG_TOD_LOW) begin
+                        tod_counter[7:0] <= D;
                         tod_running <= 1'b1;
                     end
                 end
             end
-            else begin
-                if (!tick_sync_2 && tick_sync_1) begin
-                    if (tod_50hz && tod_ticks == 3'd4 || tod_ticks == 3'd5) begin
-                        tod_ticks <= 3'd0;
-                        if (tod_10th[3:0] == 4'd9) begin
-                            tod_10th[3:0] <= 4'd0;
-                            if (tod_sec[3:0] == 4'd9) begin
-                                tod_sec[3:0] <= 4'd0;
-                                if (tod_sec[6:4] == 3'd5) begin
-                                    tod_sec[6:4] <= 3'd0;
-                                    if (tod_min[3:0] == 4'd9) begin
-                                        tod_min[3:0] <= 4'd0;
-                                        if (tod_min[6:4] == 3'd5) begin
-                                            tod_min[6:4] <= 3'd0;
-                                            if (tod_hr[3:0] == 4'd9) begin
-                                                tod_hr[3:0] <= 4'd0;
-                                                if (tod_hr[4]) begin
-                                                    tod_hr[7] <= !tod_hr[7];
-                                                end
-                                                tod_hr[4] <= !tod_hr[4];
-                                            end
-                                            else
-                                                tod_hr[3:0] <= tod_hr[3:0] + 4'd1;
-                                        end
-                                        else
-                                            tod_min[6:4] <= tod_min[6:4] + 3'd1;
-                                    end
-                                    else
-                                        tod_min[3:0] <= tod_min[3:0] + 4'd1;
-                                end
-                                else
-                                    tod_sec[6:4] <= tod_sec[6:4] + 3'd1;
-                            end
-                            else
-                                tod_sec[3:0] <= tod_sec[3:0] + 4'd1;
-                        end
-                        else
-                            tod_10th[3:0] <= tod_10th[3:0] + 4'd1;
-                    end
-                    else
-                        tod_ticks <= tod_ticks + 3'd1;
-                end
-            end
+            else if (!tick_sync_2 && tick_sync_1)
+                tod_counter <= tod_counter + 24'd1;
         end
     end
 
-    wire alarm_equal = tod_10th == alarm_10th && tod_sec == alarm_sec &&
-                        tod_min == alarm_min && tod_hr == alarm_hr;
+    wire alarm_equal = tod_counter == tod_alarm;
 
     reg prev_alarm_equal;
     always @(negedge E_CLK)
@@ -601,10 +519,10 @@ module cia(
             REG_TA_HI: data_out <= ta_counter[15:8];
             REG_TB_LO: data_out <= tb_counter[7:0];
             REG_TB_HI: data_out <= tb_counter[15:8];
-            REG_TOD_10TH: data_out <= tod_latched ? latched_10th : tod_10th;
-            REG_TOD_SEC: data_out <= tod_latched ? latched_sec : tod_sec;
-            REG_TOD_MIN: data_out <= tod_latched ? latched_min : tod_min;
-            REG_TOD_HR: data_out <= tod_latched ? latched_hr : tod_hr;
+            REG_TOD_LOW: data_out <= tod_latched ? tod_latch[7:0] : tod_counter[7:0];
+            REG_TOD_MID: data_out <= tod_latched ? tod_latch[15:8] : tod_counter[15:8];
+            REG_TOD_HI: data_out <= tod_latched ? tod_latch[23:16] : tod_counter[23:16];
+            REG_B_UNUSED: data_out <= 8'd0;
             REG_SDR: data_out <= sdr_in;
             REG_ICR: data_out <= {ir, 2'b00, icr_data};
             REG_CRA: data_out <= cra;
