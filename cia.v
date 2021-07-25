@@ -172,7 +172,7 @@ module cia(
         else begin
             if (!CS_n && !RW && A == REG_CRA && D[4])
                 ta_counter <= ta_latch;
-            else if (!CS_n && !RW && A == REG_TA_HI && !ta_running)
+            else if (!CS_n && !RW && A == REG_TA_HI && (!ta_running || ta_oneshot))
                 ta_counter <= {D, ta_latch[7:0]};
             else if (ta_running) begin
                 if (ta_counter == 16'd0)
@@ -190,7 +190,7 @@ module cia(
         else begin
             if (!CS_n && !RW && A == REG_CRB && D[4])
                 tb_counter <= tb_latch;
-            else if (!CS_n && !RW && A == REG_TB_HI && !tb_running)
+            else if (!CS_n && !RW && A == REG_TB_HI && (!tb_running || tb_oneshot))
                 tb_counter <= {D, tb_latch[7:0]};
             else if (tb_running && (!tb_count_ta_underflow || ta_underflowing)) begin
                 if (tb_counter == 16'd0)
@@ -208,6 +208,8 @@ module cia(
         else begin
             if (!CS_n && !RW && A == REG_CRA)
                 ta_running <= D[0];
+            else if (!CS_n && !RW && A == REG_TA_HI && ta_oneshot)
+                ta_running <= 1'b1;
             else if (ta_underflowing && ta_oneshot)
                 ta_running <= 1'b0;
         end
@@ -220,6 +222,8 @@ module cia(
         else begin
             if (!CS_n && !RW && A == REG_CRB)
                 tb_running <= D[0];
+            else if (!CS_n && !RW && A == REG_TB_HI && tb_oneshot)
+                tb_running <= 1'b1;
             else if (tb_underflowing && tb_oneshot)
                 tb_running <= 1'b0;
         end
