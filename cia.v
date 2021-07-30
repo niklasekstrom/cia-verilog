@@ -393,7 +393,7 @@ module cia(
         if (!RESET_n)
             sp_output <= 1'b0;
         else if (!CS_n && !RW && A == REG_CRA)
-            sp_output = D[6];
+            sp_output <= D[6];
     end
 
     reg [7:0] sdr_out;
