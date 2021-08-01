@@ -1,4 +1,4 @@
-# Implementation of 8250 Complex Interface Adapter (CIA) in Verilog
+# Implementation of 8520 Complex Interface Adapter (CIA) in Verilog
 
 I believe this should be mostly working, but it hasn't been tested so it also most likely contains a few bugs.
 

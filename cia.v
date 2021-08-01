@@ -1,5 +1,5 @@
 /*
- * Implementation of 8250 Complex Interface Adapter (CIA) in Verilog.
+ * Implementation of 8520 Complex Interface Adapter (CIA) in Verilog.
  * Written by Niklas Ekström in June 2021.
  *
  * Features:
