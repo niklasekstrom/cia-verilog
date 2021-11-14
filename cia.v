@@ -133,11 +133,11 @@ module cia(
             pc <= !CS_n && A == REG_PRB;
     end
 
-    reg prev_flag_n;
+    reg [1:0] flag_n_sync;
     always @(negedge E_CLK)
-        prev_flag_n <= FLAG_n;
+        flag_n_sync <= {flag_n_sync[0], !FLAG_n};
 
-    wire flag_falling = prev_flag_n && !FLAG_n;
+    wire flag_falling = flag_n_sync[1] && !flag_n_sync[0];
 
     // Interval timers.
     reg [15:0] ta_counter;
