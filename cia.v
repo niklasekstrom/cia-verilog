@@ -271,7 +271,7 @@ module cia(
     always @(negedge E_CLK or negedge RESET_n) begin
         if (!RESET_n)
             tod_latched <= 1'b0;
-        else if (!CS_n && RW && !tod_set_alarm) begin
+        else if (!CS_n && RW) begin
             if (A == REG_TOD_HI) begin
                 tod_latch <= tod_counter;
                 tod_latched <= 1'b1;
@@ -307,29 +307,23 @@ module cia(
         tick_sync_2 <= tick_sync_1;
     end
 
+    wire tod_write = !CS_n && !RW && !tod_set_alarm && (A == REG_TOD_HI || A == REG_TOD_MID || A == REG_TOD_LOW);
+
     always @(negedge E_CLK or negedge RESET_n) begin
         if (!RESET_n) begin
             tod_running <= 1'b0;
             tod_counter <= 24'd0;
         end
-        else begin
-            if (!CS_n && !RW && A == REG_TOD_HI) begin
-                tod_running <= 1'b0;
-                tod_counter[23:16] <= D;
-            end
-            else if (!tod_running) begin
-                if (!CS_n && !RW) begin
-                    if (A == REG_TOD_MID)
-                        tod_counter[15:8] <= D;
-                    else if (A == REG_TOD_LOW) begin
-                        tod_counter[7:0] <= D;
-                        tod_running <= 1'b1;
-                    end
-                end
-            end
-            else if (!tick_sync_2 && tick_sync_1)
-                tod_counter <= tod_counter + 24'd1;
+        else if (tod_write) begin
+            case (A)
+                REG_TOD_HI: tod_counter[23:16] <= D;
+                REG_TOD_MID: tod_counter[15:8] <= D;
+                REG_TOD_LOW: tod_counter[7:0] <= D;
+            endcase
+            tod_running <= A == REG_TOD_LOW;
         end
+        else if (tod_running && !tick_sync_2 && tick_sync_1)
+            tod_counter <= tod_counter + 24'd1;
     end
 
     wire alarm_equal = tod_counter == tod_alarm;
